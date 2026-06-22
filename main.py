@@ -35,7 +35,6 @@ def get_status():
 @app.post("/salvar-resultado")
 async def salvar_resultado(resultado: ResultadoSorteio):
     try:
-        # Insere o dado na tabela 'sorteios' do Supabase
         data = {
             "concurso": resultado.concurso,
             "numeros": resultado.numeros
@@ -51,7 +50,6 @@ async def salvar_resultado(resultado: ResultadoSorteio):
 
 @app.post("/calcular-media")
 async def calcular_media(salarios: list[float]):
-    # Manteve a lógica de cálculo que você aprovou antes
     num_descarte = int(len(salarios) * 0.20)
     df_filtrado = sorted(salarios)[num_descarte:]
     media_final = sum(df_filtrado) / len(df_filtrado) if df_filtrado else 0
