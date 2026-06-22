@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 import os
 from dotenv import load_dotenv
@@ -7,6 +8,15 @@ from pydantic import BaseModel
 # Inicialização
 load_dotenv()
 app = FastAPI()
+
+# Configuração de CORS: Essencial para o Lovable conectar ao seu Backend no Railway
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configuração Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -32,6 +42,20 @@ def get_status():
     except Exception as e:
         return {"message": "Erro na conexão", "error": str(e)}
 
+@app.get("/ultimos-concursos")
+async def ultimos_concursos():
+    try:
+        # Busca os últimos 5 registros da tabela de auditoria
+        response = supabase.table("auditoria_motor") \
+            .select("concurso, assertividade, motivos") \
+            .order("concurso", desc=True) \
+            .limit(5) \
+            .execute()
+        return response.data
+    except Exception as e:
+        # Retorna lista vazia caso a tabela ainda não esteja populada
+        return []
+
 @app.post("/salvar-resultado")
 async def salvar_resultado(resultado: ResultadoSorteio):
     try:
@@ -40,7 +64,6 @@ async def salvar_resultado(resultado: ResultadoSorteio):
             "numeros": resultado.numeros
         }
         response = supabase.table("sorteios").insert(data).execute()
-        
         return {
             "message": "Sorteio registrado com sucesso no ORION!", 
             "dados": response.data
