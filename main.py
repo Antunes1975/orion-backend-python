@@ -37,6 +37,7 @@ def read_root():
 @app.get("/status-base")
 def get_status():
     try:
+        # Busca simples para testar conexão
         response = supabase.table("sorteios").select("*", count='exact').limit(1).execute()
         return {"message": "Motor conectado ao Supabase", "status": "OK"}
     except Exception as e:
@@ -45,22 +46,23 @@ def get_status():
 @app.get("/ultimos-concursos")
 async def ultimos_concursos():
     try:
-        # Busca os últimos 5 registros da tabela de auditoria
+        # Busca usando 'Concurso' com C maiúsculo conforme sua tabela
         response = supabase.table("auditoria_motor") \
-            .select("concurso, assertividade, motivos") \
-            .order("concurso", desc=True) \
+            .select("Concurso, assertividade, motivos") \
+            .order("Concurso", desc=True) \
             .limit(5) \
             .execute()
         return response.data
     except Exception as e:
-        # Retorna lista vazia caso a tabela ainda não esteja populada
+        # Retorna lista vazia se a tabela de auditoria não existir ainda
         return []
 
 @app.post("/salvar-resultado")
 async def salvar_resultado(resultado: ResultadoSorteio):
     try:
+        # Ajuste: campo Concurso com C maiúsculo para coincidir com seu Supabase
         data = {
-            "concurso": resultado.concurso,
+            "Concurso": resultado.concurso,
             "numeros": resultado.numeros
         }
         response = supabase.table("sorteios").insert(data).execute()
