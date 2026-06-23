@@ -84,7 +84,7 @@ async def salvar_resultado(resultado: ResultadoSorteio):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# --- NOVA ROTA: DIÁRIO DE BORDO AUTOMÁTICO ---
+# --- ROTA: AUDITORIA DE PERFORMANCE (Integrada à feedback_assertividade) ---
 
 def calcular_acertos(numeros_sugeridos, numeros_sorteados):
     return len(set(numeros_sugeridos) & set(numeros_sorteados))
@@ -92,24 +92,29 @@ def calcular_acertos(numeros_sugeridos, numeros_sorteados):
 @app.post("/auditar-diario-bordo")
 async def auditar_diario(concurso: int):
     try:
+        # Busca o resultado oficial
         oficial = supabase.table("sorteios").select("*").eq("Concurso", concurso).execute()
         if not oficial.data:
             raise HTTPException(status_code=404, detail="Sorteio oficial não encontrado.")
         
         numeros_oficiais = [oficial.data[0][f"Bola{i+1}"] for i in range(15)]
         
+        # Busca sugestões (assumindo tabela 'sugestoes_geradas')
         sugestoes = supabase.table("sugestoes_geradas").select("*").eq("concurso", concurso).execute()
         
         for jogo in sugestoes.data:
             acertos = calcular_acertos(jogo["numeros"], numeros_oficiais)
-            diario_data = {
+            
+            # Gravação na sua nova tabela oficial de feedback
+            feedback_data = {
                 "concurso": concurso,
+                "sugestao_id": jogo["id"],
                 "acertos": acertos,
                 "data_conferencia": datetime.now().isoformat()
             }
-            supabase.table("diario_de_bordo").insert(diario_data).execute()
+            supabase.table("feedback_assertividade").insert(feedback_data).execute()
             
-        return {"message": f"Auditoria realizada com sucesso para o concurso {concurso}"}
+        return {"message": f"Auditoria concluída com sucesso na tabela feedback_assertividade para o concurso {concurso}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
