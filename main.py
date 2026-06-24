@@ -130,3 +130,91 @@ async def calcular_media(salarios: list[float]):
         "total": len(salarios),
         "descartados": num_descarte
     }
+import random
+
+# --- CONSTANTES ESTATÍSTICAS DO MOTOR ORION ---
+DEZENAS_PRIMOS = {2, 3, 5, 7, 11, 13, 17, 19, 23}
+DEZENAS_PARES = {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24}
+DEZENAS_MOLDURA = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
+
+def validar_zona_ouro(jogo):
+    """
+    Filtro Global: Rejeita qualquer jogo que fuja da matemática vencedora.
+    """
+    soma = sum(jogo)
+    primos = len(set(jogo) & DEZENAS_PRIMOS)
+    pares = len(set(jogo) & DEZENAS_PARES)
+    moldura = len(set(jogo) & DEZENAS_MOLDURA)
+
+    # Regras rigorosas da Fase 1
+    if not (175 <= soma <= 215): return False
+    if primos not in [5, 6]: return False
+    if pares not in [7, 8]: return False
+    if moldura not in [9, 10]: return False
+    
+    return True
+
+def gerar_cenario_ancora():
+    """
+    Gera um jogo base que obrigatoriamente passa pela Zona de Ouro.
+    """
+    todas_dezenas = list(range(1, 26))
+    
+    # Motor de força bruta otimizada (encontra o padrão em milissegundos)
+    while True:
+        jogo = random.sample(todas_dezenas, 15)
+        if validar_zona_ouro(jogo):
+            return sorted(jogo)
+
+@app.post("/gerar-jogos")
+async def gerar_jogos_quantitativos():
+    """
+    Rota principal consumida pelo Lovable para sugerir os jogos.
+    """
+    try:
+        # 1. Gera o Jogo Principal (Cenário A)
+        jogo_1 = gerar_cenario_ancora()
+
+        # 2. Gera o Jogo 2 respeitando a Distância de Hamming >= 6
+        # Eles podem ter no máximo 9 dezenas iguais, espalhando o risco.
+        tentativas = 0
+        jogo_2 = []
+        while tentativas < 2000:
+            candidato = gerar_cenario_ancora()
+            intersecao = len(set(jogo_1) & set(candidato))
+            
+            if intersecao <= 9: # Garante a distância de cobertura
+                jogo_2 = candidato
+                break
+            tentativas += 1
+
+        # Estrutura de resposta que o Dashboard do Lovable vai ler
+        return {
+            "motor": "ORION Ω Engine (Python)",
+            "status": "Sucesso",
+            "distancia_hamming": 15 - len(set(jogo_1) & set(jogo_2)),
+            "jogos": [
+                {
+                    "nome": "JOGO Ω A",
+                    "numeros": jogo_1,
+                    "metricas": {
+                        "soma": sum(jogo_1),
+                        "primos": len(set(jogo_1) & DEZENAS_PRIMOS),
+                        "pares": len(set(jogo_1) & DEZENAS_PARES),
+                        "moldura": len(set(jogo_1) & DEZENAS_MOLDURA)
+                    }
+                },
+                {
+                    "nome": "JOGO Ω B",
+                    "numeros": jogo_2,
+                    "metricas": {
+                        "soma": sum(jogo_2),
+                        "primos": len(set(jogo_2) & DEZENAS_PRIMOS),
+                        "pares": len(set(jogo_2) & DEZENAS_PARES),
+                        "moldura": len(set(jogo_2) & DEZENAS_MOLDURA)
+                    }
+                }
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
