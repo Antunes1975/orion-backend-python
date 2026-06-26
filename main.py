@@ -25,14 +25,7 @@ app.add_middleware(
 @app.middleware("http")
 async def handle_options_and_trailing_slash(request: Request, call_next):
     if request.method == "OPTIONS":
-        return Response(
-            status_code=200, 
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type",
-            }
-        )
+        return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, GET, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"})
     if request.url.path.endswith("/") and request.url.path != "/":
         request.scope["path"] = request.url.path.rstrip("/")
     return await call_next(request)
@@ -47,24 +40,12 @@ class ResultadoSorteio(BaseModel):
     numeros: list[int]
     data_sorteio: str
 
-# --- CONSTANTES ESTATÍSTICAS ---
+# --- CONSTANTES ---
 DEZENAS_PRIMOS = {2, 3, 5, 7, 11, 13, 17, 19, 23}
 DEZENAS_PARES = {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24}
 DEZENAS_MOLDURA = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
 
 # --- FUNÇÕES DO MOTOR ---
-
-def verificar_status_concurso():
-    """Verifica se o concurso atual já foi registrado no Supabase."""
-    response = supabase.table("sorteios").select("Concurso").order("Concurso", desc=True).limit(1).execute()
-    ultimo_registrado = response.data[0]['Concurso'] if response.data else 0
-    
-    # O sistema quer gerar o 3720. 
-    # Se o último na base for 3719, libera (3719 < 3720 é Verdadeiro).
-    # Se você registrar o 3720, o sistema bloqueia (3720 < 3720 é Falso).
-    CONCURSO_ALVO = 3720
-    
-    return ultimo_registrado < CONCURSO_ALVO, ultimo_registrado
 
 def validar_zona_ouro(jogo):
     soma = sum(jogo)
@@ -96,36 +77,35 @@ def gerar_cenario_ancora():
         if validar_zona_ouro(jogo):
             return jogo
 
-# --- ROTAS DA API ---
-
-@app.get("/")
-def read_root():
-    return {"status": "ORION Ω Engine Online - Fase 2 (Lógica de Bloqueio Ativa)"}
+# --- ROTAS DA API COM TRAVA ---
 
 @app.post("/gerar-jogos")
 async def gerar_jogos_quantitativos():
-    # Validação de Segurança
-    liberado, ultimo = verificar_status_concurso()
+    concurso_alvo = 3720 # Defina o concurso atual
     
-    if not liberado:
-        raise HTTPException(
-            status_code=403, 
-            detail=f"Bloqueado. Você já gerou ou registrou o concurso alvo (Último na base: {ultimo}). Aguarde o próximo sorteio oficial."
-        )
+    # Verifica se já existe uma sugestão salva para este concurso
+    check = supabase.table("sugestoes").select("*").eq("concurso", concurso_alvo).execute()
+    
+    if len(check.data) > 0:
+        # SE JÁ EXISTE, RETORNA O JOGO JÁ GERADO (TRAVA A GERAÇÃO)
+        return {"motor": "ORION Ω (Recuperado)", "jogos": check.data[0]['jogos']}
 
+    # SE NÃO EXISTE, GERA
     jogo_1 = gerar_cenario_ancora()
     for _ in range(2000):
         jogo_2 = gerar_cenario_ancora()
         if len(set(jogo_1) & set(jogo_2)) <= 9:
             break
+            
+    jogos = [
+        {"nome": "JOGO Ω A", "numeros": jogo_1, "metricas": {"soma": sum(jogo_1), "primos": len(set(jogo_1)&DEZENAS_PRIMOS), "pares": len(set(jogo_1)&DEZENAS_PARES), "moldura": len(set(jogo_1)&DEZENAS_MOLDURA)}},
+        {"nome": "JOGO Ω B", "numeros": jogo_2, "metricas": {"soma": sum(jogo_2), "primos": len(set(jogo_2)&DEZENAS_PRIMOS), "pares": len(set(jogo_2)&DEZENAS_PARES), "moldura": len(set(jogo_2)&DEZENAS_MOLDURA)}}
+    ]
     
-    return {
-        "motor": "ORION Ω Engine - Gerando para o 3720",
-        "jogos": [
-            {"nome": "JOGO Ω A", "numeros": jogo_1, "metricas": {"soma": sum(jogo_1), "primos": len(set(jogo_1)&DEZENAS_PRIMOS), "pares": len(set(jogo_1)&DEZENAS_PARES), "moldura": len(set(jogo_1)&DEZENAS_MOLDURA)}},
-            {"nome": "JOGO Ω B", "numeros": jogo_2, "metricas": {"soma": sum(jogo_2), "primos": len(set(jogo_2)&DEZENAS_PRIMOS), "pares": len(set(jogo_2)&DEZENAS_PARES), "moldura": len(set(jogo_2)&DEZENAS_MOLDURA)}}
-        ]
-    }
+    # SALVA NO SUPABASE PARA TRAVAR
+    supabase.table("sugestoes").insert({"concurso": concurso_alvo, "jogos": jogos}).execute()
+    
+    return {"motor": "ORION Ω (Gerado)", "jogos": jogos}
 
 @app.post("/salvar-resultado")
 async def salvar_resultado(resultado: ResultadoSorteio):
