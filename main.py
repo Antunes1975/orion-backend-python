@@ -59,8 +59,9 @@ def verificar_status_concurso():
     response = supabase.table("sorteios").select("Concurso").order("Concurso", desc=True).limit(1).execute()
     ultimo_registrado = response.data[0]['Concurso'] if response.data else 0
     
-    # Ajuste este valor conforme o concurso que está em aberto
-    CONCURSO_ATUAL_OFICIAL = 3720 
+    # --- AJUSTE AQUI --- 
+    # Mude para 3720 apenas quando o concurso 3720 estiver registrado na base.
+    CONCURSO_ATUAL_OFICIAL = 3719 
     
     return ultimo_registrado >= CONCURSO_ATUAL_OFICIAL, ultimo_registrado
 
