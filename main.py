@@ -13,7 +13,7 @@ from supabase import create_client
 load_dotenv()
 app = FastAPI()
 
-# --- MIDDLEWARE DE SEGURANÇA E CORS (BLINDAGEM 405) ---
+# --- MIDDLEWARE DE SEGURANÇA E CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,7 +24,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def handle_options_and_trailing_slash(request: Request, call_next):
-    # Resposta imediata para pre-flight do navegador
     if request.method == "OPTIONS":
         return Response(
             status_code=200, 
@@ -34,7 +33,6 @@ async def handle_options_and_trailing_slash(request: Request, call_next):
                 "Access-Control-Allow-Headers": "Content-Type",
             }
         )
-    # Sanitização da URL
     if request.url.path.endswith("/") and request.url.path != "/":
         request.scope["path"] = request.url.path.rstrip("/")
     return await call_next(request)
@@ -55,6 +53,16 @@ DEZENAS_PARES = {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24}
 DEZENAS_MOLDURA = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
 
 # --- FUNÇÕES DO MOTOR ---
+
+def verificar_status_concurso():
+    """Verifica se o concurso atual já foi registrado no Supabase."""
+    response = supabase.table("sorteios").select("Concurso").order("Concurso", desc=True).limit(1).execute()
+    ultimo_registrado = response.data[0]['Concurso'] if response.data else 0
+    
+    # Ajuste este valor conforme o concurso que está em aberto
+    CONCURSO_ATUAL_OFICIAL = 3720 
+    
+    return ultimo_registrado >= CONCURSO_ATUAL_OFICIAL, ultimo_registrado
 
 def validar_zona_ouro(jogo):
     soma = sum(jogo)
@@ -90,10 +98,18 @@ def gerar_cenario_ancora():
 
 @app.get("/")
 def read_root():
-    return {"status": "ORION Ω Engine Online - Fase 2 (Ready)"}
+    return {"status": "ORION Ω Engine Online - Fase 2 (Bloqueio Ativo)"}
 
 @app.post("/gerar-jogos")
 async def gerar_jogos_quantitativos():
+    # Validação de Segurança
+    liberado, ultimo = verificar_status_concurso()
+    if not liberado:
+        raise HTTPException(
+            status_code=403, 
+            detail=f"Bloqueado. Último concurso registrado: {ultimo}. Insira o próximo resultado."
+        )
+
     jogo_1 = gerar_cenario_ancora()
     for _ in range(2000):
         jogo_2 = gerar_cenario_ancora()
@@ -101,7 +117,7 @@ async def gerar_jogos_quantitativos():
             break
     
     return {
-        "motor": "ORION Ω Engine - Fase 2 (Ponderada)",
+        "motor": "ORION Ω Engine - Bloqueio de Concurso Ativo",
         "jogos": [
             {"nome": "JOGO Ω A", "numeros": jogo_1, "metricas": {"soma": sum(jogo_1), "primos": len(set(jogo_1)&DEZENAS_PRIMOS), "pares": len(set(jogo_1)&DEZENAS_PARES), "moldura": len(set(jogo_1)&DEZENAS_MOLDURA)}},
             {"nome": "JOGO Ω B", "numeros": jogo_2, "metricas": {"soma": sum(jogo_2), "primos": len(set(jogo_2)&DEZENAS_PRIMOS), "pares": len(set(jogo_2)&DEZENAS_PARES), "moldura": len(set(jogo_2)&DEZENAS_MOLDURA)}}
