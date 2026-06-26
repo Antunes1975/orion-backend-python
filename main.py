@@ -13,7 +13,7 @@ from supabase import create_client
 load_dotenv()
 app = FastAPI()
 
-# --- MIDDLEWARE DE SEGURANÇA E CORS ---
+# --- MIDDLEWARE DE SEGURANÇA E CORS (BLINDAGEM 405) ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,14 +24,17 @@ app.add_middleware(
 
 @app.middleware("http")
 async def handle_options_and_trailing_slash(request: Request, call_next):
-    # Trata pré-flight requests do navegador
+    # Resposta imediata para pre-flight do navegador
     if request.method == "OPTIONS":
-        return Response(status_code=200, headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": "*",
-        })
-    # Remove barras no final para evitar erros de rota
+        return Response(
+            status_code=200, 
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+            }
+        )
+    # Sanitização da URL
     if request.url.path.endswith("/") and request.url.path != "/":
         request.scope["path"] = request.url.path.rstrip("/")
     return await call_next(request)
@@ -87,7 +90,7 @@ def gerar_cenario_ancora():
 
 @app.get("/")
 def read_root():
-    return {"status": "ORION Ω Engine Online - Fase 2"}
+    return {"status": "ORION Ω Engine Online - Fase 2 (Ready)"}
 
 @app.post("/gerar-jogos")
 async def gerar_jogos_quantitativos():
