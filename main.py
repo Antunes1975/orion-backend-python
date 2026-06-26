@@ -59,11 +59,12 @@ def verificar_status_concurso():
     response = supabase.table("sorteios").select("Concurso").order("Concurso", desc=True).limit(1).execute()
     ultimo_registrado = response.data[0]['Concurso'] if response.data else 0
     
-    # --- AJUSTE AQUI --- 
-    # Mude para 3720 apenas quando o concurso 3720 estiver registrado na base.
-    CONCURSO_ATUAL_OFICIAL = 3719 
+    # O sistema quer gerar o 3720. 
+    # Se o último na base for 3719, libera (3719 < 3720 é Verdadeiro).
+    # Se você registrar o 3720, o sistema bloqueia (3720 < 3720 é Falso).
+    CONCURSO_ALVO = 3720
     
-    return ultimo_registrado >= CONCURSO_ATUAL_OFICIAL, ultimo_registrado
+    return ultimo_registrado < CONCURSO_ALVO, ultimo_registrado
 
 def validar_zona_ouro(jogo):
     soma = sum(jogo)
@@ -99,16 +100,17 @@ def gerar_cenario_ancora():
 
 @app.get("/")
 def read_root():
-    return {"status": "ORION Ω Engine Online - Fase 2 (Bloqueio Ativo)"}
+    return {"status": "ORION Ω Engine Online - Fase 2 (Lógica de Bloqueio Ativa)"}
 
 @app.post("/gerar-jogos")
 async def gerar_jogos_quantitativos():
     # Validação de Segurança
     liberado, ultimo = verificar_status_concurso()
+    
     if not liberado:
         raise HTTPException(
             status_code=403, 
-            detail=f"Bloqueado. Último concurso registrado: {ultimo}. Insira o próximo resultado."
+            detail=f"Bloqueado. Você já gerou ou registrou o concurso alvo (Último na base: {ultimo}). Aguarde o próximo sorteio oficial."
         )
 
     jogo_1 = gerar_cenario_ancora()
@@ -118,7 +120,7 @@ async def gerar_jogos_quantitativos():
             break
     
     return {
-        "motor": "ORION Ω Engine - Bloqueio de Concurso Ativo",
+        "motor": "ORION Ω Engine - Gerando para o 3720",
         "jogos": [
             {"nome": "JOGO Ω A", "numeros": jogo_1, "metricas": {"soma": sum(jogo_1), "primos": len(set(jogo_1)&DEZENAS_PRIMOS), "pares": len(set(jogo_1)&DEZENAS_PARES), "moldura": len(set(jogo_1)&DEZENAS_MOLDURA)}},
             {"nome": "JOGO Ω B", "numeros": jogo_2, "metricas": {"soma": sum(jogo_2), "primos": len(set(jogo_2)&DEZENAS_PRIMOS), "pares": len(set(jogo_2)&DEZENAS_PARES), "moldura": len(set(jogo_2)&DEZENAS_MOLDURA)}}
