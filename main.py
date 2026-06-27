@@ -68,6 +68,8 @@ def sync():
     for i in range(15): data[f"Bola{i+1}"] = dezenas[i]
     supabase.table("sorteios").insert(data).execute()
     return {"status": "Sucesso", "concurso": concurso}
-
 @app.get("/configuracoes")
 def get_config(): return {"motor_padrao": "RACE", "janela_estatistica": 50}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
