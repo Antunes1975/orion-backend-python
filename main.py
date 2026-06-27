@@ -12,10 +12,9 @@ app = FastAPI()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Conexão Segura
 supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
-# --- MOTOR ESTATÍSTICO ---
+# --- MOTOR ---
 def validar_zona_ouro(jogo):
     soma = sum(jogo)
     primos = len(set(jogo) & {2, 3, 5, 7, 11, 13, 17, 19, 23})
@@ -30,56 +29,53 @@ def gerar_cenario_ancora():
         if validar_zona_ouro(jogo): return jogo
     return sorted(random.sample(todas, 15))
 
-# --- ROTAS DE PRODUÇÃO ---
-
-@app.get("/")
-def read_root(): return {"status": "ORION Ω Engine Online"}
+# --- ROTAS ---
 
 @app.get("/status-base")
 def status():
     resp = supabase.table("sorteios").select("Concurso").order("Concurso", desc=True).limit(1).execute()
-    ult = resp.data[0]['Concurso'] if resp.data else 0
-    return {"ultimo": ult, "alvo": 3720}
+    ult = resp.data[0]['Concurso'] if resp.data else 3719
+    return {"ultimo": ult, "proximo": ult + 1}
 
 @app.get("/historico-assertividade")
 def obter_historico():
-    """Endpoint de Inteligência: Busca sugestões e cruza com resultados oficiais."""
-    try:
-        sugestoes = supabase.table("sugestoes").select("*").order("concurso", desc=True).limit(10).execute().data
-        sorteios = supabase.table("sorteios").select("*").order("Concurso", desc=True).limit(10).execute().data
-        
-        # Cruzamento de Dados
-        for sug in sugestoes:
-            sorteio = next((s for s in sorteios if s['Concurso'] == sug['concurso']), None)
-            if sorteio:
-                oficiais = set([sorteio.get(f"Bola{i}") for i in range(1, 16)])
-                for jogo in sug['jogos']:
-                    acertos = len(set(jogo['numeros']) & oficiais)
-                    jogo['acertos'] = acertos
-                    jogo['status'] = "HIT" if acertos >= 13 else "PARCIAL" if acertos >= 11 else "MISS"
-            else:
-                for jogo in sug['jogos']:
-                    jogo['acertos'] = 0
-                    jogo['status'] = "AGUARDANDO"
-        return {"concursos": sugestoes}
-    except Exception as e:
-        return {"concursos": [], "erro": str(e)}
+    sugestoes = supabase.table("sugestoes").select("*").order("concurso", desc=True).limit(10).execute().data
+    sorteios = supabase.table("sorteios").select("*").order("Concurso", desc=True).limit(10).execute().data
+    
+    for sug in sugestoes:
+        sorteio = next((s for s in sorteios if s['Concurso'] == sug['concurso']), None)
+        if sorteio:
+            oficiais = set([sorteio.get(f"Bola{i}") for i in range(1, 16)])
+            for jogo in sug['jogos']:
+                acertos = len(set(jogo['numeros']) & oficiais)
+                jogo.update({"acertos": acertos, "status": "HIT" if acertos >= 13 else "PARCIAL" if acertos >= 11 else "MISS"})
+        else:
+            for jogo in sug['jogos']: jogo.update({"acertos": 0, "status": "AGUARDANDO"})
+    return {"concursos": sugestoes}
 
 @app.post("/gerar-jogos")
 def gerar_jogos():
+    # Pega o último sorteio e gera jogos para o próximo
+    resp = supabase.table("sorteios").select("Concurso").order("Concurso", desc=True).limit(1).execute()
+    prox_concurso = (resp.data[0]['Concurso'] + 1) if resp.data else 3720
+    
     jogos = [{"nome": "JOGO Ω A", "numeros": gerar_cenario_ancora()}, {"nome": "JOGO Ω B", "numeros": gerar_cenario_ancora()}]
-    supabase.table("sugestoes").insert({"concurso": 3720, "jogos": jogos}).execute()
-    return {"motor": "ORION Ω", "jogos": jogos}
+    supabase.table("sugestoes").insert({"concurso": prox_concurso, "jogos": jogos}).execute()
+    return {"concurso": prox_concurso, "jogos": jogos}
 
 @app.post("/auto-sincronizar")
 def sync():
     url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
     resp = requests.get(url, verify=False, timeout=10).json()
-    concurso = resp["numero"]
+    concurso = int(resp["numero"])
     dezenas = [int(d) for d in resp["listaDezenas"]]
-    data = {"Concurso": concurso, **{f"Bola{i+1}": dezenas[i] for i in range(15)}}
-    supabase.table("sorteios").insert(data).execute()
-    return {"status": "Sucesso", "concurso": concurso}
+    
+    check = supabase.table("sorteios").select("Concurso").eq("Concurso", concurso).execute()
+    if not check.data:
+        data = {"Concurso": concurso, **{f"Bola{i+1}": dezenas[i] for i in range(15)}}
+        supabase.table("sorteios").insert(data).execute()
+        return {"status": "Novo concurso inserido", "concurso": concurso}
+    return {"status": "Concurso já existe no banco", "concurso": concurso}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
