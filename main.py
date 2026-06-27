@@ -165,7 +165,6 @@ async def gerar_jogos_quantitativos():
     
     # Grava no banco para congelar e impedir novos cliques repetidos
     try:
-        # Corrigido o erro de digitação de "juegos" para "jogos"
         supabase.table("sugestoes").insert({"concurso": concurso_alvo, "jogos": jogos}).execute()
     except Exception:
         pass # Fallback caso a tabela precise de ajustes estruturais externos
@@ -179,9 +178,65 @@ async def salvar_resultado(resultado: ResultadoSorteio):
     supabase.table("sorteios").insert(data).execute()
     return {"status": "Registrado com sucesso"}
 
-@app.post("/auditar-diario-bordo")
-async def auditar_diario(concurso: int):
-    return {"status": "Auditado"}
+@app.get("/historico-assertividade")
+def obter_historico_assertividade():
+    """Busca todas as sugestões geradas e cruza com os resultados da Caixa para calcular os acertos."""
+    try:
+        # 1. Pega as sugestões armazenadas
+        sugestoes_resp = supabase.table("sugestoes").select("*").order("concurso", desc=True).limit(10).execute()
+        
+        if not sugestoes_resp.data:
+            return {"concursos": []}
+            
+        resultados_auditoria = []
+        
+        for sug in sugestoes_resp.data:
+            num_concurso = sug["concurso"]
+            jogos_gerados = sug["jogos"]
+            
+            # 2. Busca o resultado oficial deste concurso no banco
+            sorteio_resp = supabase.table("sorteios").select("*").eq("Concurso", num_concurso).execute()
+            
+            if sorteio_resp.data:
+                sorteio_oficial = sorteio_resp.data[0]
+                # Monta a lista de dezenas oficiais sorteadas
+                dezenas_oficiais = [sorteio_oficial.get(f"Bola{i}") for i in range(1, 16)]
+                dezenas_oficiais = set([d for d in dezenas_oficiais if d is not None])
+                
+                dados_jogos = []
+                for jogo in jogos_gerados:
+                    # Converte os números do jogo para set para cruzar os acertos
+                    numeros_jogo = set(jogo["numeros"])
+                    acertos = len(numeros_jogo & dezenas_oficiais)
+                    
+                    # Classificação do resultado
+                    if acertos >= 13: status_res = "HIT"
+                    elif acertos >= 11: status_res = "PARCIAL"
+                    else: status_res = "MISS"
+                    
+                    dados_jogos.append({
+                        "nome": jogo["nome"],
+                        "acertos": acertos,
+                        "resultado": status_res
+                    })
+                
+                resultados_auditoria.append({
+                    "concurso": num_concurso,
+                    "status": "CONFERIDO",
+                    "jogos": dados_jogos
+                })
+            else:
+                # Se o resultado ainda não saiu na Caixa
+                resultados_auditoria.append({
+                    "concurso": num_concurso,
+                    "status": "AGUARDANDO_SORTEIO",
+                    "jogos": [{"nome": j["nome"], "acertos": 0, "resultado": "PENDENTE"} for j in jogos_gerados]
+                })
+                
+        return {"concursos": resultados_auditoria}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na auditoria: {str(e)}")
 
 @app.post("/auto-sincronizar")
 def auto_sincronizar_caixa():
