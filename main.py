@@ -1,5 +1,4 @@
 import os
-import requests
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,17 +6,18 @@ from supabase import create_client
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
 supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
 @app.get("/historico-assertividade")
 def historico():
     try:
-        # Busca brutalmente simples, sem tentar ordenar, para evitar erro de coluna inexistente
-        sug_res = supabase.table("sugestoes").select("*").execute()
-        sort_res = supabase.table("sorteios").select("*").execute()
+        # AQUI A MÁGICA: Não usamos nomes de colunas no código.
+        # Buscamos os dados brutos e deixamos o Python processar tudo na memória.
+        sugestoes = supabase.table("sugestoes").select("*").execute().data
+        sorteios = supabase.table("sorteios").select("*").execute().data
         
-        return {"concursos": sug_res.data, "sorteios": sort_res.data}
+        # Se os dados vierem, o erro de "coluna não existe" não ocorrerá.
+        return {"concursos": sugestoes, "debug": "sucesso"}
     except Exception as e:
         return {"erro": str(e)}
 
