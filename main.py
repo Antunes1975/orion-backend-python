@@ -13,20 +13,18 @@ supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABAS
 @app.get("/historico-assertividade")
 def historico():
     try:
-        # A DICA DO BANCO FOI: use "concurso" (minúsculo)
-        res = supabase.table("sugestoes").select("*").order("concurso", desc=True).limit(10).execute()
-        sugestoes = res.data
+        # Usando "concurso" minúsculo para ambas as tabelas
+        sug_res = supabase.table("sugestoes").select("*").order("concurso", desc=True).limit(10).execute()
+        sort_res = supabase.table("sorteios").select("*").order("concurso", desc=True).limit(15).execute()
         
-        # A tabela sorteios usa "Concurso" (maiúsculo, confirmado antes)
-        sort_res = supabase.table("sorteios").select("*").order("Concurso", desc=True).limit(15).execute()
+        sugestoes = sug_res.data
         sorteios = sort_res.data
         
         for sug in sugestoes:
-            # Cruzamento: sug['concurso'] (min) com sorteio['Concurso'] (mai)
-            sorteio = next((s for s in sorteios if s['Concurso'] == sug['concurso']), None)
+            # Cruzamento usando "concurso" em ambos
+            sorteio = next((s for s in sorteios if s['concurso'] == sug['concurso']), None)
             if sorteio:
                 oficiais = set([sorteio.get(f"Bola{i}") for i in range(1, 16) if sorteio.get(f"Bola{i}")])
-                # Acessa 'jogos' diretamente como a estrutura JSON que você tem
                 if 'jogos' in sug and isinstance(sug['jogos'], list) and len(sug['jogos']) > 0:
                     sug['acertos'] = len(set(sug['jogos'][0].get('numeros', [])) & oficiais)
                 else:
@@ -35,7 +33,26 @@ def historico():
                 sug['acertos'] = 0
         return {"concursos": sugestoes}
     except Exception as e:
-        return {"erro": "Erro final de mapeamento: " + str(e)}
+        return {"erro": "Erro de mapeamento: " + str(e)}
+
+@app.post("/auto-sincronizar")
+def sync():
+    url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
+    try:
+        resp = requests.get(url, verify=False, timeout=10).json()
+        concurso_atual = int(resp["numero"])
+        dezenas = [int(d) for d in resp["listaDezenas"]]
+        
+        # Usando "concurso" minúsculo
+        check = supabase.table("sorteios").select("concurso").eq("concurso", concurso_atual).execute()
+        
+        if not check.data:
+            data = {"concurso": concurso_atual, **{f"Bola{i+1}": dezenas[i] for i in range(15)}}
+            supabase.table("sorteios").insert(data).execute()
+            return {"status": "Inserido"}
+        return {"status": "Já existe"}
+    except Exception as e:
+        return {"erro": str(e)}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
