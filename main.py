@@ -1,36 +1,35 @@
 import os
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 
 app = FastAPI()
-# CORS aberto para qualquer origem
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 supabase = create_client(os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_KEY"))
 
-@app.get("/status")
-def status():
-    return {"status": "online"}
-
 @app.get("/historico-assertividade")
 def historico():
     try:
-        # Busca direta, sem ordenações complexas para evitar erro de coluna
-        res = supabase.table("sugestoes").select("*").limit(5).execute()
-        return {"concursos": res.data}
+        # Busca sem filtros de ordem complexos para não quebrar no nome da coluna
+        # O .select("*") traz tudo o que existir, sem forçar nomes de colunas
+        sug_data = supabase.table("sugestoes").select("*").execute().data
+        sort_data = supabase.table("sorteios").select("*").execute().data
+        
+        return {"concursos": sug_data, "debug_sorteios": sort_data[:5]}
     except Exception as e:
-        return {"erro": str(e)}
+        return {"erro": "O banco retornou: " + str(e)}
 
 @app.post("/salvar-manual")
-def salvar_manual(payload: dict):
-    # payload deve ser: {"concurso": 3720, "bolas": [1, 2, ...]}
+def salvar(payload: dict):
     try:
-        data = {"Concurso": payload["concurso"], **{f"Bola{i+1}": payload["bolas"][i] for i in range(15)}}
-        supabase.table("sorteios").insert(data).execute()
-        return {"status": "ok"}
+        # O payload deve ser: {"tabela": "sorteios", "dados": {...}}
+        # Isso permite salvar sem que o Python precise saber o nome das colunas previamente
+        tabela = payload.get("tabela", "sorteios")
+        supabase.table(tabela).insert(payload["dados"]).execute()
+        return {"status": "sucesso"}
     except Exception as e:
         return {"erro": str(e)}
 
