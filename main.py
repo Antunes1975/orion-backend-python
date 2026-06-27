@@ -1,5 +1,6 @@
 import os
 import random
+import requests
 import numpy as np
 from datetime import datetime
 from dotenv import load_dotenv
@@ -164,7 +165,8 @@ async def gerar_jogos_quantitativos():
     
     # Grava no banco para congelar e impedir novos cliques repetidos
     try:
-        supabase.table("sugestoes").insert({"concurso": concurso_alvo, "jogos": juegos}).execute()
+        # Corrigido o erro de digitação de "juegos" para "jogos"
+        supabase.table("sugestoes").insert({"concurso": concurso_alvo, "jogos": jogos}).execute()
     except Exception:
         pass # Fallback caso a tabela precise de ajustes estruturais externos
     
@@ -180,3 +182,47 @@ async def salvar_resultado(resultado: ResultadoSorteio):
 @app.post("/auditar-diario-bordo")
 async def auditar_diario(concurso: int):
     return {"status": "Auditado"}
+
+@app.post("/auto-sincronizar")
+def auto_sincronizar_caixa():
+    """Busca o último sorteio oficial da Caixa e salva no Supabase automaticamente."""
+    url = "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil"
+    
+    try:
+        # verify=False é usado pois os certificados do governo brasileiro costumam dar erro no Python
+        response = requests.get(url, verify=False, timeout=10)
+        
+        if response.status_code != 200:
+            raise HTTPException(status_code=500, detail="Erro ao contatar a API da Caixa Econômica.")
+            
+        dados = response.json()
+        concurso_oficial = dados["numero"]
+        
+        # As dezenas vêm como lista de strings (ex: ["01", "04", ...]), convertendo para inteiros:
+        dezenas = [int(d) for d in dados["listaDezenas"]]
+        
+        # 1. Verifica se este concurso já está no seu Supabase
+        check = supabase.table("sorteios").select("Concurso").eq("Concurso", concurso_oficial).execute()
+        
+        if len(check.data) > 0:
+            return {
+                "status": "Atualizado", 
+                "mensagem": f"A sua base já está em dia com a Caixa (Concurso {concurso_oficial})."
+            }
+            
+        # 2. Se for um concurso novo, prepara no formato exato da sua tabela
+        novo_sorteio = {"Concurso": concurso_oficial}
+        for i in range(15):
+            novo_sorteio[f"Bola{i+1}"] = dezenas[i]
+            
+        # 3. Grava no banco de dados permanentemente
+        supabase.table("sorteios").insert(novo_sorteio).execute()
+        
+        return {
+            "status": "Sucesso", 
+            "concurso_adicionado": concurso_oficial,
+            "mensagem": f"Concurso {concurso_oficial} sincronizado automaticamente da Caixa!"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha na sincronização: {str(e)}")
