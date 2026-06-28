@@ -13,7 +13,7 @@ from supabase import create_client
 load_dotenv()
 app = FastAPI()
 
-# --- MIDDLEWARE DE SEGURANÇA E CORS BLINDADO ---
+# --- MIDDLEWARE DE SEGURANÇA E CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,18 +22,8 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-@app.middleware("http")
-async def handle_options_and_trailing_slash(request: Request, call_next):
-    if request.method == "OPTIONS":
-        return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, GET, PUT, DELETE, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization"})
-    if request.url.path.endswith("/") and request.url.path != "/":
-        request.scope["path"] = request.url.path.rstrip("/")
-    return await call_next(request)
-
 # Conexão Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 # --- MODELOS ---
 class ResultadoSorteio(BaseModel):
@@ -56,9 +46,9 @@ CONFIG_CACHE = {"motor_padrao": "RACE", "janela_estatistica": 50, "simulacoes_mo
 
 # --- FUNÇÕES ---
 def verificar_status_concurso():
-    # Mapeamento forçado para "Concurso" (maiúsculo)
+    # Aspas duplas forçam o Postgres a aceitar "Concurso" maiúsculo
     response = supabase.table("sorteios").select('"Concurso"').order('"Concurso"', desc=True).limit(1).execute()
-    ultimo_registrado = response.data[0]['Concurso'] if response.data else 0
+    ultimo_registrado = response.data[0].get('Concurso') if response.data else 0
     return ultimo_registrado < 3720, ultimo_registrado
 
 def validar_zona_ouro(jogo):
@@ -82,13 +72,8 @@ def gerar_cenario_ancora():
     pesos = calcular_pesos_dezenas()
     todas = list(range(1, 26))
     while True:
-        jogo = random.choices(todas, weights=pesos, k=15)
-        jogo = sorted(list(set(jogo)))
-        if len(jogo) < 15:
-            faltam = 15 - len(jogo)
-            extras = [d for d in todas if d not in jogo]
-            jogo = sorted(jogo + random.sample(extras, faltam))
-        if validar_zona_ouro(jogo): return jogo
+        jogo = sorted(list(set(random.choices(todas, weights=pesos, k=15))))
+        if len(jogo) == 15 and validar_zona_ouro(jogo): return jogo
 
 # --- ROTAS ---
 @app.get("/")
@@ -99,34 +84,33 @@ def get_status_base():
     liberado, ultimo = verificar_status_concurso()
     return {"ultimo_concurso_supabase": ultimo, "status_geracao": "LIBERADO" if liberado else "BLOQUEADO"}
 
+@app.get("/historico-assertividade")
+def historico():
+    sug = supabase.table("sugestoes").select("*").execute().data
+    sort = supabase.table("sorteios").select("*").execute().data
+    return {"concursos": sug, "sorteios": sort}
+
 @app.post("/gerar-jogos")
-async def gerar_jogos_quantitativos():
-    # Garantindo que a consulta use 'concurso' (minúsculo) conforme a tabela sugestoes
-    check = supabase.table("sugestoes").select("*").eq("concurso", 3720).execute()
-    if len(check.data) > 0: return {"motor": "ORION Ω (Recuperado)", "jogos": check.data[0]['jogos']}
+async def gerar_jogos():
+    concurso_alvo = 3720
+    check = supabase.table("sugestoes").select("*").eq("concurso", concurso_alvo).execute()
+    if len(check.data) > 0: return {"motor": "Recuperado", "jogos": check.data[0]['jogos']}
     
     jogo_1 = gerar_cenario_ancora()
-    for _ in range(CONFIG_CACHE["simulacoes_monte_carlo"]):
-        jogo_2 = gerar_cenario_ancora()
-        if len(set(jogo_1) & set(jogo_2)) <= 9: break
+    jogo_2 = gerar_cenario_ancora()
+    jogos = [{"nome": "JOGO A", "numeros": jogo_1}, {"nome": "JOGO B", "numeros": jogo_2}]
     
-    jogos = [
-        {"nome": "JOGO Ω A", "numeros": jogo_1},
-        {"nome": "JOGO Ω B", "numeros": jogo_2}
-    ]
-    try:
-        supabase.table("sugestoes").insert({"concurso": 3720, "jogos": jogos}).execute()
-    except Exception as e:
-        print(f"Erro ao salvar: {e}")
+    supabase.table("sugestoes").insert({"concurso": concurso_alvo, "jogos": jogos}).execute()
     return {"motor": "ORION Ω", "jogos": jogos}
 
 @app.post("/salvar-resultado")
 async def salvar_resultado(resultado: ResultadoSorteio):
-    # Forçando maiúsculo para "Concurso" e "BolaX" conforme estrutura de sorteios
+    # Aspas duplas resolvem o erro 42703
     data = {'"Concurso"': resultado.concurso}
     for i in range(15): data[f'"Bola{i+1}"'] = resultado.numeros[i]
     supabase.table("sorteios").insert(data).execute()
-    return {"status": "Registrado com sucesso"}
+    return {"status": "Registrado"}
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
