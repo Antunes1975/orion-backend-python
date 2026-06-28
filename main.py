@@ -25,14 +25,7 @@ app.add_middleware(
 @app.middleware("http")
 async def handle_options_and_trailing_slash(request: Request, call_next):
     if request.method == "OPTIONS":
-        return Response(
-            status_code=200, 
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "POST, GET, PUT, DELETE, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            }
-        )
+        return Response(status_code=200, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, GET, PUT, DELETE, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization"})
     if request.url.path.endswith("/") and request.url.path != "/":
         request.scope["path"] = request.url.path.rstrip("/")
     return await call_next(request)
@@ -42,7 +35,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- MODELOS DE DADOS (PYDANTIC) ---
+# --- MODELOS ---
 class ResultadoSorteio(BaseModel):
     concurso: int
     numeros: list[int]
@@ -54,26 +47,19 @@ class ConfigMotor(BaseModel):
     simulacoes_monte_carlo: int = 25000
     threshold_css: float = 60.0
 
-# --- CONSTANTES ESTATÍSTICAS ---
+# --- CONSTANTES ---
 DEZENAS_PRIMOS = {2, 3, 5, 7, 11, 13, 17, 19, 23}
 DEZENAS_PARES = {2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24}
 DEZENAS_MOLDURA = {1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25}
 
-CONFIG_CACHE = {
-    "motor_padrao": "RACE",
-    "janela_estatistica": 50,
-    "simulacoes_monte_carlo": 25000,
-    "threshold_css": 62.3
-}
+CONFIG_CACHE = {"motor_padrao": "RACE", "janela_estatistica": 50, "simulacoes_monte_carlo": 25000, "threshold_css": 62.3}
 
-# --- FUNÇÕES INTERNAS DO MOTOR ---
+# --- FUNÇÕES ---
 def verificar_status_concurso():
-    """Busca o último concurso real inserido para validar o bloqueio anti-repetição."""
-    # FORÇADO: Aspas duplas para "Concurso"
+    # Mapeamento forçado para "Concurso" (maiúsculo)
     response = supabase.table("sorteios").select('"Concurso"').order('"Concurso"', desc=True).limit(1).execute()
     ultimo_registrado = response.data[0]['Concurso'] if response.data else 0
-    CONCURSO_ALVO = 3720
-    return ultimo_registrado < CONCURSO_ALVO, ultimo_registrado
+    return ultimo_registrado < 3720, ultimo_registrado
 
 def validar_zona_ouro(jogo):
     soma = sum(jogo)
@@ -83,7 +69,6 @@ def validar_zona_ouro(jogo):
     return (175 <= soma <= 215) and (primos in [5, 6]) and (pares in [7, 8]) and (moldura in [9, 10])
 
 def calcular_pesos_dezenas():
-    # FORÇADO: Aspas duplas para "Concurso"
     response = supabase.table("sorteios").select("*").order('"Concurso"', desc=True).limit(CONFIG_CACHE["janela_estatistica"]).execute()
     contagem = {i: 0 for i in range(1, 26)}
     for sorteio in response.data:
@@ -95,80 +80,53 @@ def calcular_pesos_dezenas():
 
 def gerar_cenario_ancora():
     pesos = calcular_pesos_dezenas()
-    todas_dezenas = list(range(1, 26))
+    todas = list(range(1, 26))
     while True:
-        jogo = random.choices(todas_dezenas, weights=pesos, k=15)
+        jogo = random.choices(todas, weights=pesos, k=15)
         jogo = sorted(list(set(jogo)))
         if len(jogo) < 15:
             faltam = 15 - len(jogo)
-            extras = [d for d in todas_dezenas if d not in jogo]
+            extras = [d for d in todas if d not in jogo]
             jogo = sorted(jogo + random.sample(extras, faltam))
-        if validar_zona_ouro(jogo):
-            return jogo
+        if validar_zona_ouro(jogo): return jogo
 
-# --- ROTAS DA API ---
+# --- ROTAS ---
 @app.get("/")
-def read_root():
-    return {"status": "ORION Ω Engine Online", "versao": "2.4.0-Estável"}
+def read_root(): return {"status": "ORION Ω Engine Online", "versao": "2.4.0-Estável"}
 
 @app.get("/status-base")
 def get_status_base():
     liberado, ultimo = verificar_status_concurso()
-    return {
-        "ultimo_concurso_supabase": ultimo,
-        "proximo_alvo_motor": 3720,
-        "status_geracao": "LIBERADO" if liberado else "BLOQUEADO_AGUARDANDO_RESULTADO"
-    }
-
-@app.get("/ultimos-concursos")
-def get_ultimos_concursos():
-    # FORÇADO: Aspas duplas para "Concurso"
-    response = supabase.table("sorteios").select('"Concurso"').order('"Concurso"', desc=True).limit(5).execute()
-    return {"concursos": [r['Concurso'] for r in response.data] if response.data else []}
-
-@app.get("/configuracoes")
-def get_configuracoes():
-    return CONFIG_CACHE
-
-@app.put("/configuracoes")
-def update_configuracoes(config: ConfigMotor):
-    CONFIG_CACHE.update(config.dict())
-    return {"status": "Configurações do motor atualizadas com sucesso", "atual": CONFIG_CACHE}
+    return {"ultimo_concurso_supabase": ultimo, "status_geracao": "LIBERADO" if liberado else "BLOQUEADO"}
 
 @app.post("/gerar-jogos")
 async def gerar_jogos_quantitativos():
-    concurso_alvo = 3720
-    check = supabase.table("sugestoes").select("*").eq("concurso", concurso_alvo).execute()
-    if len(check.data) > 0:
-        return {"motor": "ORION Ω (Cenário Consolidado Recuperado)", "jogos": check.data[0]['jogos']}
-
+    # Garantindo que a consulta use 'concurso' (minúsculo) conforme a tabela sugestoes
+    check = supabase.table("sugestoes").select("*").eq("concurso", 3720).execute()
+    if len(check.data) > 0: return {"motor": "ORION Ω (Recuperado)", "jogos": check.data[0]['jogos']}
+    
     jogo_1 = gerar_cenario_ancora()
     for _ in range(CONFIG_CACHE["simulacoes_monte_carlo"]):
         jogo_2 = gerar_cenario_ancora()
         if len(set(jogo_1) & set(jogo_2)) <= 9: break
-            
-    jogos = [
-        {"nome": "JOGO Ω A", "numeros": jogo_1, "metricas": {"soma": sum(jogo_1), "primos": len(set(jogo_1)&DEZENAS_PRIMOS), "pares": len(set(jogo_1)&DEZENAS_PARES), "moldura": len(set(jogo_1)&DEZENAS_MOLDURA)}},
-        {"nome": "JOGO Ω B", "numeros": jogo_2, "metricas": {"soma": sum(jogo_2), "primos": len(set(jogo_2)&DEZENAS_PRIMOS), "pares": len(set(jogo_2)&DEZENAS_PARES), "moldura": len(set(jogo_2)&DEZENAS_MOLDURA)}}
-    ]
     
+    jogos = [
+        {"nome": "JOGO Ω A", "numeros": jogo_1},
+        {"nome": "JOGO Ω B", "numeros": jogo_2}
+    ]
     try:
-        supabase.table("sugestoes").insert({"concurso": concurso_alvo, "jogos": jogos}).execute()
-    except Exception:
-        pass 
-    return {"motor": f"ORION Ω ({CONFIG_CACHE['motor_padrao']})", "jogos": jogos}
+        supabase.table("sugestoes").insert({"concurso": 3720, "jogos": jogos}).execute()
+    except Exception as e:
+        print(f"Erro ao salvar: {e}")
+    return {"motor": "ORION Ω", "jogos": jogos}
 
 @app.post("/salvar-resultado")
 async def salvar_resultado(resultado: ResultadoSorteio):
-    # FORÇADO: Aspas duplas para forçar o nome da coluna no banco
+    # Forçando maiúsculo para "Concurso" e "BolaX" conforme estrutura de sorteios
     data = {'"Concurso"': resultado.concurso}
     for i in range(15): data[f'"Bola{i+1}"'] = resultado.numeros[i]
     supabase.table("sorteios").insert(data).execute()
     return {"status": "Registrado com sucesso"}
-
-@app.post("/auditar-diario-bordo")
-async def auditar_diario(concurso: int):
-    return {"status": "Auditado"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
