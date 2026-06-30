@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-supabase
-pandas
-numpy
-python-dotenv
-requests
